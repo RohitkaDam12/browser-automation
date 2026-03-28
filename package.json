@@ -1,0 +1,38 @@
+{
+  "name": "chaicode-agent",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "dev": "DOTENV_QUIET=true tsx src/main.ts",
+    "build": "tsc",
+    "start": "node dist/main.js",
+    "dev:server": "tsx src/server.ts",
+    "dev:web": "npm --prefix frontend run dev",
+    "dev:all": "concurrently -n server,web -c green,cyan \"npm:dev:server\" \"npm:dev:web\""
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.1",
+    "express": "^5.1.0",
+    "node-cron": "^4.2.1",
+    "openai": "^5.15.0",
+    "playwright": "^1.55.0",
+    "tailwindcss": "^4.0.0",
+    "turndown": "^7.2.1",
+    "zod": "^3.25.76",
+    "zod-to-json-schema": "^3.24.6"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.3",
+    "@types/node": "^24.3.0",
+    "@types/turndown": "^5.0.5",
+    "concurrently": "^9.2.1",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2"
+  }
+}

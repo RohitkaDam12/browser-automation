@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "name": "Gmail Compose Helper",
+  "version": "0.1.0",
+  "description": "Compose & send an email in Gmail from a content script.",
+  "permissions": ["scripting", "activeTab", "tabs", "storage"],
+  "host_permissions": ["https://mail.google.com/*"],
+  "action": { "default_title": "Gmail Compose Helper" },
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [
+    {
+      "matches": ["https://mail.google.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

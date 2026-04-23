@@ -36,6 +36,7 @@ Rules:
 - For search tasks: include the exact search query.
 - For form tasks: include all field values.
 - For social posts: include the exact post text (generate a good one if user only gave a topic).
+- For WhatsApp tasks: extract contact_name, phone_number (if given), and message into dataBag.
 - Today's date: ${new Date().toLocaleDateString("en-IN", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}.
 
 Site resolution examples:
@@ -46,6 +47,7 @@ Site resolution examples:
 - "youtube" -> "https://www.youtube.com"
 - "github" -> "https://github.com"
 - "linkedin" -> "https://www.linkedin.com"
+- "whatsapp" / "wa" / "whatsapp web" -> "https://web.whatsapp.com"
 `.trim();
 
 export async function routeIntent(userPrompt: string): Promise<TaskIntent> {

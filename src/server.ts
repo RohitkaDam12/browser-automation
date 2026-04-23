@@ -9,6 +9,8 @@ import { scrapeJobs, type ScrapeJobsResult } from "./scrapers/jobScraper";
 import { parseJobScrapeIntent, looksLikeJobScrapeRequest } from "./scrapers/jobIntentParser";
 import { scheduleMeeting, type MeetingResult } from "./meeting/meetingRouter";
 import { looksLikeMeetingRequest } from "./meeting/meetingParser";
+import { sendWhatsAppMessage } from "./whatsapp/whatsappSender";
+import { parseWhatsAppIntent, looksLikeWhatsAppRequest } from "./whatsapp/whatsappIntentParser";
 
 const app = express();
 app.use(cors());
@@ -40,7 +42,7 @@ function updateTask(taskId: string, patch: Partial<Task>) {
   tasks.set(taskId, { ...existing, ...patch, updatedAt: new Date().toISOString() });
 }
 
-// ─── Background runner ────────────────────────────────────────────────────────
+// ─── Background runners ───────────────────────────────────────────────────────
 
 async function runTask(taskId: string, prompt: string, cdpUrl?: string) {
   updateTask(taskId, { status: "running" });
@@ -56,6 +58,37 @@ async function runTask(taskId: string, prompt: string, cdpUrl?: string) {
       verificationResult: {
         taskCompleted: true,
         reason: `Successfully completed: ${intent.goal}`,
+      },
+    });
+  } catch (err: any) {
+    const msg = err?.message || String(err);
+    updateTask(taskId, {
+      status: "failed",
+      error: msg,
+      verificationResult: { taskCompleted: false, reason: msg },
+    });
+  }
+}
+
+async function runWhatsAppTask(taskId: string, prompt: string, cdpUrl?: string) {
+  updateTask(taskId, { status: "running" });
+  try {
+    const intent = await parseWhatsAppIntent(prompt);
+    updateTask(taskId, {
+      resolvedIntent: {
+        contactName: intent.contactName,
+        phoneNumber: intent.phoneNumber,
+        goal: intent.goal,
+      },
+    });
+
+    const result = await sendWhatsAppMessage(intent, cdpUrl);
+
+    updateTask(taskId, {
+      status: "completed",
+      verificationResult: {
+        taskCompleted: true,
+        reason: `Message sent to "${result.contactName}" at ${result.sentAt}`,
       },
     });
   } catch (err: any) {
@@ -87,6 +120,22 @@ app.post("/api/tasks", async (req, res) => {
     } catch (err: any) {
       return res.status(500).json({ ok: false, error: err?.message || "Meeting creation failed" });
     }
+  }
+
+  // Auto-detect WhatsApp messaging requests
+  if (looksLikeWhatsAppRequest(trimmed)) {
+    const taskId = randomUUID();
+    const now = new Date().toISOString();
+    tasks.set(taskId, {
+      taskId,
+      prompt: trimmed,
+      status: "pending",
+      createdAt: now,
+      updatedAt: now,
+    });
+    console.log(`\n💬 WhatsApp task queued [${taskId}]: "${trimmed}"\n`);
+    runWhatsAppTask(taskId, trimmed, cdpUrl).catch(() => {});
+    return res.json({ ok: true, taskId, type: "whatsapp" });
   }
 
   // Auto-detect job scrape requests and route to the dedicated scraper
@@ -146,6 +195,44 @@ app.get("/api/health", (_req, res) => {
   res.json({ ok: true, ts: new Date().toISOString() });
 });
 
+// ─── WhatsApp Routes ──────────────────────────────────────────────────────────
+
+/**
+ * POST /api/whatsapp
+ * Body (natural language):  { "prompt": "send a message to Rahul saying I'll be 10 mins late" }
+ * Body (structured):        { "contactName": "Rahul", "message": "I'll be 10 mins late", "cdpUrl": "..." }
+ * Body (with phone number): { "contactName": "+919876543210", "phoneNumber": "+919876543210", "message": "Hey!" }
+ */
+app.post("/api/whatsapp", async (req, res) => {
+  const { prompt, contactName, phoneNumber, message, cdpUrl } = req.body || {};
+
+  if (!prompt && !(contactName && message)) {
+    return res.status(400).json({
+      ok: false,
+      error: 'Provide either "prompt" (natural language) or both "contactName" and "message"',
+    });
+  }
+
+  try {
+    const intent = prompt
+      ? await parseWhatsAppIntent(prompt.trim())
+      : {
+          contactName: contactName.trim(),
+          phoneNumber: (phoneNumber || "").trim(),
+          message: message.trim(),
+          goal: `Send WhatsApp message to ${contactName}`,
+        };
+
+    console.log(`\n💬 WhatsApp API: sending to "${intent.contactName}"`);
+    const result = await sendWhatsAppMessage(intent, cdpUrl);
+
+    return res.json({ ok: true, result });
+  } catch (err: any) {
+    const msg = err?.message || String(err);
+    console.error(`\n❌ WhatsApp send failed: ${msg}`);
+    return res.status(500).json({ ok: false, error: msg });
+  }
+});
 
 // ─── Job Scrape Store ─────────────────────────────────────────────────────────
 
@@ -284,7 +371,6 @@ app.get("/api/scrape/jobs", (_req, res) => {
   return res.json({ ok: true, total: list.length, scrapes: list });
 });
 
-
 // ─── Meeting Routes ───────────────────────────────────────────────────────────
 
 /**
@@ -313,6 +399,9 @@ app.post("/api/meetings", async (req, res) => {
 const PORT = process.env.PORT || 8787;
 app.listen(PORT, () => {
   console.log(`\n✅ Generic Agent API on http://localhost:${PORT}`);
+  console.log(`   WhatsApp    : POST /api/whatsapp`);
+  console.log(`   Meetings    : POST /api/meetings`);
   console.log(`   Job scraping: POST /api/scrape/jobs | GET /api/scrape/jobs/:id`);
-  console.log(`   Supports any website — Amazon, Flipkart, Gmail, Twitter, GitHub, LinkedIn, etc.\n`);
+  console.log(`   Tasks       : POST /api/tasks | GET /api/tasks/:id`);
+  console.log(`   Supports any website — Amazon, Flipkart, Gmail, Twitter, WhatsApp, GitHub, LinkedIn, etc.\n`);
 });

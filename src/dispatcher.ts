@@ -9,6 +9,8 @@ import { screenshotBase64 } from "./vision";
 import { generatePlanFromPrompt } from "./llmPlanner";
 import { mergeSelectorMaps, type SelectorMap } from "./selectors";
 import { twitterSelectors } from "./x/selectors.twitter";
+import { sendWhatsAppMessage } from "./whatsapp/whatsappSender";
+import { parseWhatsAppIntent, looksLikeWhatsAppRequest } from "./whatsapp/whatsappIntentParser";
 import type { TaskIntent } from "./intentRouter";
 
 const DEFAULT_CDP = process.env.CHROME_CDP || "http://127.0.0.1:9333";
@@ -88,6 +90,38 @@ async function generateTweetTextFromGoal(goal: string): Promise<string> {
   let text = (resp as any).output_text || goal;
   text = text.replace(/#\w+/g, "").replace(/@\w+/g, "").trim();
   return text.slice(0, 240);
+}
+
+// ─── WhatsApp detection ───────────────────────────────────────────────────────
+
+function isWhatsAppIntent(intent: TaskIntent): boolean {
+  return (
+    /web\.whatsapp\.com|whatsapp\.com/i.test(intent.site) ||
+    looksLikeWhatsAppRequest(intent.prompt)
+  );
+}
+
+async function dispatchWhatsApp(intent: TaskIntent, cdp?: string): Promise<void> {
+  console.log("💬 WhatsApp intent detected — using dedicated WhatsApp flow");
+
+  // Re-parse with the WhatsApp-specific intent parser for richer extraction
+  // (intentRouter gives us a generic TaskIntent; whatsappIntentParser extracts
+  //  contactName, phoneNumber, and message more precisely)
+  const waIntent = await parseWhatsAppIntent(intent.prompt);
+
+  // Merge any dataBag values the intentRouter already extracted
+  if (!waIntent.phoneNumber && intent.dataBag["phone_number"]) {
+    waIntent.phoneNumber = intent.dataBag["phone_number"];
+  }
+  if (intent.dataBag["contact_name"] && waIntent.contactName === "MISSING") {
+    waIntent.contactName = intent.dataBag["contact_name"];
+  }
+  if (intent.dataBag["message"] && !waIntent.message) {
+    waIntent.message = intent.dataBag["message"];
+  }
+
+  await sendWhatsAppMessage(waIntent, cdp);
+  console.log("✅ WhatsApp message sent successfully.");
 }
 
 // ─── Shared run options ───────────────────────────────────────────────────────
@@ -221,6 +255,11 @@ function inferLogicalKeys(prompt: string): string[] {
     keys.push("compose_area", "post_button");
   }
 
+  // WhatsApp
+  if (p.includes("whatsapp") || p.includes("whats app") || p.includes("wa ")) {
+    keys.push("search_box", "first_search_result", "message_input", "send_button");
+  }
+
   // E-commerce
   if (p.includes("cart") || p.includes("add to cart") || p.includes("buy")) {
     keys.push("add_to_cart_button", "buy_now_button", "checkout_button");
@@ -250,6 +289,11 @@ export async function dispatch(intent: TaskIntent, cdp?: string): Promise<void> 
   // ── Twitter/X: dedicated flow, skip generic explore/plan pipeline ──────────
   if (isTwitterIntent(intent)) {
     return dispatchTwitter(intent, cdp);
+  }
+
+  // ── WhatsApp: dedicated flow, skip generic explore/plan pipeline ───────────
+  if (isWhatsAppIntent(intent)) {
+    return dispatchWhatsApp(intent, cdp);
   }
 
   const runOpts = buildRunOpts(cdp);
